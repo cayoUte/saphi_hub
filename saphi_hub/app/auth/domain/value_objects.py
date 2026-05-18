@@ -132,6 +132,13 @@ class GitHubRawRepo:
     topics: list[str]
     stargazers_count: int
 
+@dataclass(frozen=True)
+class GitHubUserPayload:
+    github_id: int
+    login:     str
+    name:      str | None
+    email:     str | None
+    repos:     list[GitHubRawRepo]
 
 __all__: list[str] = [
     "GitHubCode",
@@ -140,4 +147,5 @@ __all__: list[str] = [
     "UserSlug",
     "AccessToken",
     "GitHubRawRepo",
+    "GitHubUserPayload",
 ]

@@ -32,7 +32,7 @@ from auth.domain.entities import GithubIdentity, Skill, User, Userfrom
 
 
 from auth.domain.value_objects import Email
-from saphi_hub.app.auth.domain.errors import GithubProfilePersistenceError, UserPersistenceError
+from auth.domain.errors import GithubProfilePersistenceError, UserPersistenceError
 from shared.option import Nothing, Option, Some
 from shared.result import Err, Ok, Result
 

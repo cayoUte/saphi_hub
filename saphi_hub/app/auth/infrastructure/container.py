@@ -28,8 +28,8 @@ from auth.infrastructure.persistence.unit_of_work import (
     make_uow,
 )
 from auth.infrastructure.security.token_issuer import JWTTokenIssuer
-from app.core.config import Settings
-from saphi_hub.app.auth.infrastructure.github.adapter import GitHubOAuthAdapter
+from core.config import Settings
+from auth.infrastructure.github.adapter import GitHubOAuthAdapter
 
 
 class AuthContainer:
