@@ -23,8 +23,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordBearer
 
-from app.auth.application.use_cases.github_login import GitHubLoginFn, GitHubLoginOutput
-from app.auth.domain.errors import (
+from auth.application.use_cases.github_login import GitHubLoginFn, GitHubLoginOutput
+from auth.domain.errors import (
     GithubProfilePersistenceError,
     GitHubApiError,
     GitHubCodeExchangeError,

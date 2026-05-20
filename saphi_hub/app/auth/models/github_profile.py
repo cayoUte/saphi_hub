@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy import BigInteger, Column, ForeignKey, String, TIMESTAMP, text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
-from app.shared.db.base import Base
+from shared.db.base import Base
 
 
 class GithubProfile(Base):

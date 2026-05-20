@@ -24,9 +24,9 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from app.core.config import settings
-from app.auth.infrastructure.container import AuthContainer
-from app.auth.routes.router import router as auth_router
+from core.config import settings
+from auth.infrastructure.container import AuthContainer
+from auth.routes.router import router as auth_router
 
 
 # ---------------------------------------------------------------------------

@@ -1,12 +1,12 @@
 from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
-from app.shared.db.base import Base
-from app.core.config import settings
+from shared.db.base import Base
+from core.config import settings
 
 # importar todos los modelos para que Alembic los detecte
-import app.auth.models.user
-import app.auth.models.github_profile
+import auth.models.user
+import auth.models.github_profile
 import app.institutions.models.institution
 import app.institutions.models.verification_checklist
 

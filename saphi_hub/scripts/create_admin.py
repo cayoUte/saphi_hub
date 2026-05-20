@@ -3,8 +3,8 @@ Crea un usuario admin inicial.
 Uso: docker compose exec api python scripts/create_admin.py
 """
 import uuid
-from app.shared.db.session import SessionLocal
-from app.auth.models.user import User, UserRole
+from shared.db.session import SessionLocal
+from auth.models.user import User, UserRole
 
 db = SessionLocal()
 admin = User(

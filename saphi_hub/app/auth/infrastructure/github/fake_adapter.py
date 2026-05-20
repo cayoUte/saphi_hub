@@ -32,7 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from auth.domain.entities import GitHubUserPayload
-from auth.domain.errors import GitHubApiError, GitHubCodeExchangeError
+from auth.domain.errors import AuthError, GitHubApiError, GitHubCodeExchangeError
 from auth.domain.value_objects import GitHubCode, GitHubRawRepo, GitHubToken
 from shared.result import Err, Ok, Result
 
@@ -63,7 +63,7 @@ class FakeGitHubOAuthAdapter:
 
     async def exchange_code(
         self, code: GitHubCode
-    ) -> Result[GitHubToken, GitHubCodeExchangeError | GitHubApiError]:
+    ) -> Result[GitHubToken, AuthError]:
         self.codes_seen.append(code.value)
 
         if self.exchange_error is not None:
@@ -74,7 +74,7 @@ class FakeGitHubOAuthAdapter:
 
     async def fetch_user(
         self, token: GitHubToken
-    ) -> Result[GitHubUserPayload, GitHubApiError]:
+    ) -> Result[GitHubUserPayload, AuthError]:
         self.tokens_seen.append(token.value)
 
         if self.fetch_error is not None:
@@ -92,7 +92,7 @@ class FakeGitHubOAuthAdapter:
         login: str = "estudiante01",
         name: str = "Estudiante Prueba",
         email: str | None = "estudiante@epn.edu.ec",
-        repos: list[GitHubRawRepo] | None = None,
+        repos: tuple[GitHubRawRepo, ...] | None = None,
     ) -> FakeGitHubOAuthAdapter:
         """Flujo completo sin errores."""
         return cls(
@@ -135,7 +135,7 @@ class FakeGitHubOAuthAdapter:
                 github_id=99002,
                 login="anonimo_dev",
                 name="Anónimo Dev",
-                email=None,              # el caso de uso debe resolverlo
+                email=None,
                 repos=_default_repos(),
             ),
         )
@@ -150,7 +150,7 @@ class FakeGitHubOAuthAdapter:
                 login="nuevo_usuario",
                 name="Nuevo Usuario",
                 email="nuevo@espol.edu.ec",
-                repos=[],
+                repos=(),
             ),
         )
 
@@ -159,8 +159,8 @@ class FakeGitHubOAuthAdapter:
 # Datos por defecto
 # ---------------------------------------------------------------------------
 
-def _default_repos() -> list[GitHubRawRepo]:
-    return [
+def _default_repos() -> tuple[GitHubRawRepo, ...]:
+    return (
         GitHubRawRepo(
             name="backend-api",
             language="Python",
@@ -179,7 +179,7 @@ def _default_repos() -> list[GitHubRawRepo]:
             topics=["react", "nextjs"],
             stargazers_count=8,
         ),
-    ]
+    )
 
 
 def _default_payload() -> GitHubUserPayload:

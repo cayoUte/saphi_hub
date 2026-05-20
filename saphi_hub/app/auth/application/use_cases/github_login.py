@@ -253,7 +253,7 @@ def _sync_skills(
     Best-effort: si falla la persistencia, devuelve el User con skills
     en memoria pero sin interrumpir el flujo de login.
     """
-    skills: tuple[Skill, ...] = extract_skills_from_repos(tuple(payload.repos))
+    skills: tuple[Skill, ...] = tuple(extract_skills_from_repos(tuple(payload.repos)))
     users.save_skills(user.id, skills)   # ignoramos el Result — best-effort
     return apply_skills(user, skills)
 

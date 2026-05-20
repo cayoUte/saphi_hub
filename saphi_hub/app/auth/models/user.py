@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy import Boolean, Column, Enum, String, TIMESTAMP, text
 from sqlalchemy.dialects.postgresql import UUID
-from app.shared.db.base import Base
+from shared.db.base import Base
 import enum
 
 

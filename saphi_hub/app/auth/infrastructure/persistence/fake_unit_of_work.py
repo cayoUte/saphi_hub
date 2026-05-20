@@ -28,9 +28,7 @@ import uuid
 from types import TracebackType
 from typing import Self
 
-from auth.domain.entities import GithubIdentity, Skill, User, Userfrom
-
-
+from auth.domain.entities import GithubIdentity, Skill, User
 from auth.domain.value_objects import Email
 from auth.domain.errors import GithubProfilePersistenceError, UserPersistenceError
 from shared.option import Nothing, Option, Some

@@ -1,7 +1,7 @@
 import uuid
 from sqlalchemy import Boolean, Column, ForeignKey, TIMESTAMP, text
 from sqlalchemy.dialects.postgresql import UUID
-from app.shared.db.base import Base
+from shared.db.base import Base
 
 
 class InstitutionVerificationChecklist(Base):
