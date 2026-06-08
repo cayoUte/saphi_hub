@@ -134,11 +134,15 @@ class GitHubRawRepo:
 
 @dataclass(frozen=True)
 class GitHubUserPayload:
+    """
+    Datos crudos de la API de GitHub.
+    La infra lo construye; el dominio lo consume como input de funciones puras.
+    """
     github_id: int
     login:     str
     name:      str | None
     email:     str | None
-    repos:     list[GitHubRawRepo]
+    repos:     tuple[GitHubRawRepo, ...]
 
 __all__: list[str] = [
     "GitHubCode",

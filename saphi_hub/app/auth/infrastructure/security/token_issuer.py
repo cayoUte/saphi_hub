@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from jose import jwt
 from jose.exceptions import ExpiredSignatureError, JWTError
@@ -81,7 +82,7 @@ class JWTTokenIssuer:
 
     def decode(
         self, token: str
-    ) -> Result[dict, TokenExpiredError | TokenInvalidError]:
+    ) -> Result[dict[str, Any], TokenExpiredError | TokenInvalidError]:
         """
         Verifica y decodifica un JWT.
         Usado por la dependencia get_current_user de FastAPI.

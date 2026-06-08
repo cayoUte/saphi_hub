@@ -1,5 +1,5 @@
 """
-auth/routes/router.py
+auth/routes/router.py 
 =====================
 Endpoints HTTP del módulo de autenticación.
 
@@ -18,12 +18,14 @@ from __future__ import annotations
 
 import urllib.parse
 import uuid
-from typing import Annotated
+from typing import Annotated, NoReturn, TypedDict, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordBearer
+from pydantic import HttpUrl
 
 from auth.application.use_cases.github_login import GitHubLoginFn, GitHubLoginOutput
+from auth.domain.entities import User
 from auth.domain.errors import (
     GithubProfilePersistenceError,
     GitHubApiError,
@@ -41,7 +43,6 @@ from auth.routes.schemas import (
     CurrentUserResponse,
     GitHubLoginResponse,
     RedirectURLResponse,
-    SkillOut,
     UserOut,
 )
 from shared.option import Nothing, Some
@@ -51,6 +52,13 @@ router      = APIRouter()
 _oauth2     = OAuth2PasswordBearer(tokenUrl="/auth/github/callback", auto_error=False)
 _GITHUB_URL = "https://github.com/login/oauth/authorize"
 _SCOPES     = "read:user user:email"
+
+
+class JWTPayload(TypedDict):
+    sub:  str
+    role: str
+    exp:  int
+    iat:  int
 
 
 # ---------------------------------------------------------------------------
@@ -73,34 +81,29 @@ def github_redirect(
         "client_id": container.github_client_id,
         "scope":     _SCOPES,
     })
-    return RedirectURLResponse(url=f"{_GITHUB_URL}?{params}")
+    return RedirectURLResponse(url=cast(HttpUrl, f"{_GITHUB_URL}?{params}"))
 
 
 # ---------------------------------------------------------------------------
 # GET /auth/github/callback
 # ---------------------------------------------------------------------------
 
-@router.get(
-    "/github/callback",
-    response_model=GitHubLoginResponse,
-    status_code=status.HTTP_200_OK,
-)
+@router.get("/github/callback", response_model=GitHubLoginResponse)
 async def github_callback(
-    code:      Annotated[str, Query(description="Código temporal emitido por GitHub")],
+    code:      Annotated[str, Query()],
     container: Annotated[AuthContainer, Depends(_container)],
 ) -> GitHubLoginResponse:
-    uow     = container.new_uow()
-    execute = container.github_login(uow)    # GitHubLoginFn — simple Callable
+    uow = container.new_uow()
 
     with uow:
-        result = await execute(GitHubCode(value=code))
+        execute = container.github_login(uow)
+        result  = await execute(GitHubCode(value=code))
         match result:
             case Ok(value=output):
                 uow.commit()
+                return _to_login_response(output)
             case Err(error=error):
                 _raise_http_error(error)
-
-    return _to_login_response(output)        # type: ignore[possibly-undefined]
 
 
 # ---------------------------------------------------------------------------
@@ -137,61 +140,34 @@ def get_me(
                 headers={"WWW-Authenticate": "Bearer"},
             )
         case Ok(value=payload):
-            pass
+            jwt_payload = cast(JWTPayload, payload)
 
-    uow = container.new_uow()
-    with uow:
-        user_opt = uow.users.find_by_id(uuid.UUID(payload["sub"]))  # type: ignore[possibly-undefined]
+            uow = container.new_uow()
+            with uow:
+                user_opt = uow.users.find_by_id(uuid.UUID(jwt_payload["sub"]))
 
-    match user_opt:
-        case Nothing():
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-        case Some(value=user):
-            if not user.is_active:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Cuenta desactivada",
-                )
+            match user_opt:
+                case Nothing():
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+                case Some(value=domain_user):
+                    if not domain_user.is_active:
+                        raise HTTPException(
+                            status_code=status.HTTP_403_FORBIDDEN,
+                            detail="Cuenta desactivada",
+                        )
+                    return CurrentUserResponse.from_user(domain_user)
 
-    return CurrentUserResponse(
-        user=_to_user_out(user),             # type: ignore[possibly-undefined]
-        skills=[
-            SkillOut(name=s.name, category=s.category, weight=s.weight)
-            for s in user.skills             # type: ignore[possibly-undefined]
-        ],
-    )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+    raise RuntimeError("JWT decode match should be exhaustive")
 
 def _to_login_response(output: GitHubLoginOutput) -> GitHubLoginResponse:
-    return GitHubLoginResponse(
-        access_token=output.access_token.value,
-        expires_in=output.access_token.expires_in,
-        is_new_user=output.is_new_user,
-        user=_to_user_out(output.user),
-        skills=[
-            SkillOut(name=s.name, category=s.category, weight=s.weight)
-            for s in output.user.skills
-        ],
-    )
+    return GitHubLoginResponse.from_output(output)
 
 
-def _to_user_out(user) -> UserOut:
-    return UserOut(
-        id=user.id,
-        role=user.role.value,
-        email=user.email.value,
-        display_name=user.display_name,
-        slug=user.slug.value,
-        is_active=user.is_active,
-        created_at=user.created_at,
-    )
+def _to_user_out(user: User) -> UserOut:
+    return UserOut.from_domain(user)
 
 
-def _raise_http_error(error: object) -> None:
+def _raise_http_error(error: object) -> NoReturn:
     """Convierte AuthError de dominio en HTTPException. Exhaustivo por diseño."""
     match error:
         case GitHubCodeExchangeError():
@@ -231,4 +207,4 @@ def _raise_http_error(error: object) -> None:
             )
 
 
-__all__: list[str] = ["router"]
+__all__: list[str] = ["router", "JWTPayload"]

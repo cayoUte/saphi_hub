@@ -1,0 +1,170 @@
+---
+description: Refuerza el typing del módulo auth usando Pydantic v2. Aplica cuando se trabaje en schemas, value objects, o cualquier boundary entre capas del módulo auth (routes/schemas.py, domain/value_objects.py, application/use_cases/).
+globs: ["app/auth/**/*.py", "app/shared/**/*.py"]
+alwaysApply: false
+---
+
+# Skill: Refuerzo de Typing con Pydantic v2 — Módulo Auth
+
+## Contexto del Proyecto
+
+Este proyecto usa **arquitectura limpia en capas**:
+
+```
+routes/schemas.py       ← Pydantic (API boundary)
+application/use_cases/  ← lógica orquestadora, tipos propios
+domain/value_objects.py ← dataclasses frozen (sin Pydantic)
+domain/entities.py      ← dataclasses frozen (sin Pydantic)
+infrastructure/         ← ORM SQLAlchemy + mappers
+```
+
+**Regla de oro**: Pydantic vive **solo** en `routes/schemas.py` y en helpers de validación de entrada. El dominio nunca importa Pydantic.
+
+---
+
+## Problemas de Typing Actuales a Resolver
+
+### 1. `UserOut.role` es `str` — debería ser el enum `UserRole`
+
+```python
+# ❌ Actual — pierde información de tipo
+class UserOut(BaseModel):
+    role: str
+
+# ✅ Correcto
+from auth.domain.entities import UserRole
+
+class UserOut(BaseModel):
+    role: UserRole   # Pydantic v2 serializa StrEnum a string automáticamente
+```
+
+### 2. `UserOut.email` y `UserOut.slug` son `str` desnudo
+
+Los value objects `Email` y `UserSlug` ya existen. El schema debe extraer `.value` en el validador, no en el helper del router.
+
+```python
+# ❌ Actual — _to_user_out() hace la extracción manualmente
+def _to_user_out(user) -> UserOut:
+    return UserOut(email=user.email.value, slug=user.slug.value, ...)
+
+# ✅ Correcto — el schema valida y extrae
+from pydantic import field_validator
+
+class UserOut(BaseModel):
+    email: EmailStr          # valida formato email
+    slug:  str               # slug ya es string puro
+
+    @classmethod
+    def from_domain(cls, user: "User") -> "UserOut":
+        return cls(
+            id=user.id,
+            role=user.role,
+            email=user.email.value,
+            display_name=user.display_name,
+            slug=user.slug.value,
+            is_active=user.is_active,
+            created_at=user.created_at,
+        )
+```
+
+### 3. `_to_user_out(user)` recibe `user` sin tipo
+
+```python
+# ❌ Actual
+def _to_user_out(user) -> UserOut:   # user: Any implícito
+
+# ✅ Correcto
+from auth.domain.entities import User as DomainUser
+
+def _to_user_out(user: DomainUser) -> UserOut:
+```
+
+### 4. `GitHubRawRepo` en `value_objects.py` duplica definición con `entities.py`
+
+`GitHubUserPayload` también aparece en ambos archivos. Solo debe vivir en `domain/value_objects.py`.
+
+### 5. `SkillOut.category` es `str` libre — debería ser `Literal`
+
+```python
+# ❌ Actual
+class SkillOut(BaseModel):
+    category: str
+
+# ✅ Correcto
+from typing import Literal
+
+SkillCategory = Literal["language", "topic", "framework", "other"]
+
+class SkillOut(BaseModel):
+    category: SkillCategory
+```
+
+---
+
+## Proceso de Implementación (Red-Green-Refactor)
+
+### Paso 1 — Tipos en `routes/schemas.py`
+
+1. Importar `UserRole` desde `auth.domain.entities`
+2. Cambiar `role: str` → `role: UserRole`
+3. Cambiar `email: str` → `email: EmailStr` (importar de `pydantic`)
+4. Añadir `SkillCategory = Literal[...]`
+5. Añadir `UserOut.from_domain(user: DomainUser)` como factory method
+6. Verificar que `model_config = {"from_attributes": True}` sigue presente
+
+### Paso 2 — Tipos en `routes/router.py`
+
+1. Anotar `_to_user_out(user: DomainUser) -> UserOut`
+2. Eliminar el `# type: ignore[possibly-undefined]` en `/me` usando variable auxiliar tipada
+3. Tipar `payload` del JWT decode: crear `JWTPayload = TypedDict("JWTPayload", {"sub": str, "role": str, "exp": int})`
+
+### Paso 3 — Limpiar duplicados en `value_objects.py` / `entities.py`
+
+- `GitHubUserPayload` debe importarse desde `value_objects` en `entities.py`, no redefinirse
+- Verificar que ningún archivo del dominio importa Pydantic
+
+### Paso 4 — Verificación
+
+```bash
+# Ejecutar type checker
+pyright app/auth/
+
+# Ejecutar tests existentes
+pytest tests/auth/ -v
+
+# Verificar que los schemas siguen serializando correctamente
+python -c "
+from app.auth.routes.schemas import UserOut
+import uuid, datetime
+u = UserOut(
+    id=uuid.uuid4(), role='student', email='test@test.com',
+    display_name='Test', slug='test', is_active=True,
+    created_at=datetime.datetime.now()
+)
+print(u.model_dump())
+"
+```
+
+---
+
+## Anti-patrones a Evitar
+
+| Anti-patrón | Por qué es malo | Corrección |
+|-------------|-----------------|------------|
+| `user: Any` en funciones del router | Pyright no puede verificar accesos a `.email.value` | Anotar con `DomainUser` |
+| Pydantic en `domain/` | Viola inversión de dependencias | Solo dataclasses en dominio |
+| `# type: ignore` sin comentario explicativo | Oculta problemas reales | Tipar correctamente o documentar por qué es necesario |
+| Duplicar `GitHubUserPayload` en dos archivos | Divergencia silenciosa | Un solo lugar canónico |
+| `category: str` en `SkillOut` | Valores inválidos pasan silenciosamente | `Literal["language", "topic", "framework", "other"]` |
+
+---
+
+## Verificación de Salida (Definition of Done)
+
+- [ ] `pyright app/auth/` sin errores (excepto los ya existentes en infra/ORM)
+- [ ] `pytest tests/auth/ -v` verde
+- [ ] Ningún `# type: ignore[possibly-undefined]` en `router.py`
+- [ ] `UserOut.role` es `UserRole`, no `str`
+- [ ] `_to_user_out` tiene firma completa: `(user: DomainUser) -> UserOut`
+- [ ] `GitHubUserPayload` definido en un solo lugar
+- [ ] `SkillOut.category` usa `Literal`

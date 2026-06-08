@@ -22,6 +22,7 @@ import os
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import String, TypeDecorator
+from sqlalchemy.engine import Dialect
 
 
 # ---------------------------------------------------------------------------
@@ -61,14 +62,14 @@ class EncryptedString(TypeDecorator):
     impl = String
     cache_ok = True
 
-    def process_bind_param(self, value: str | None, dialect) -> str | None:
+    def process_bind_param(self, value: str | None, dialect: Dialect) -> str | None:
         """Plaintext → ciphertext antes de INSERT/UPDATE."""
         if value is None:
             return None
         fernet = _load_key()
         return fernet.encrypt(value.encode()).decode()
 
-    def process_result_value(self, value: str | None, dialect) -> str | None:
+    def process_result_value(self, value: str | None, dialect: Dialect) -> str | None:
         """Ciphertext → plaintext después de SELECT."""
         if value is None:
             return None

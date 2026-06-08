@@ -36,7 +36,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Protocol
+from typing import Protocol, cast
 
 from auth.domain.entities import (
     GithubIdentity,
@@ -129,7 +129,8 @@ def make_github_login(
 
         # 3 ── Resolver email (GitHub puede no exponerlo)
         match _resolve_email(payload):
-            case Err() as err:  return err
+            case Err() as err:
+                return cast(Result[GitHubLoginOutput, AuthError], err)
             case Ok(value=email): pass
 
         # 4 ── Encontrar o crear usuario
@@ -140,7 +141,8 @@ def make_github_login(
         # 5 ── Construir identidad de GitHub y persistirla
         identity = _build_identity(user.id, token, payload)
         match github_profiles.save(identity):
-            case Err() as err: return err
+            case Err() as err:
+                return cast(Result[GitHubLoginOutput, AuthError], err)
             case Ok(): pass
 
         # 6 ── Vincular identidad al valor User (produce User nuevo)
@@ -215,14 +217,15 @@ def _create_new_user(
 
     match generate_unique_slug(display_name, existing):
         case Err() as err:
-            return err
+            return cast(Result[tuple[User, bool], AuthError], err)
         case Ok(value=slug):
             pass
 
     new_user = create_user(email=email, display_name=display_name, slug=slug)
 
     match users.save(new_user):
-        case Err() as err:        return err
+        case Err() as err:
+            return cast(Result[tuple[User, bool], AuthError], err)
         case Ok(value=saved_user): return Ok((saved_user, True))
 
 
@@ -253,7 +256,7 @@ def _sync_skills(
     Best-effort: si falla la persistencia, devuelve el User con skills
     en memoria pero sin interrumpir el flujo de login.
     """
-    skills: tuple[Skill, ...] = tuple(extract_skills_from_repos(tuple(payload.repos)))
+    skills: tuple[Skill, ...] = tuple(extract_skills_from_repos(payload.repos))
     users.save_skills(user.id, skills)   # ignoramos el Result — best-effort
     return apply_skills(user, skills)
 

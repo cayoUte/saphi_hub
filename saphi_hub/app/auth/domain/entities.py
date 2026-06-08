@@ -21,7 +21,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from auth.domain.value_objects import Email, GitHubRawRepo, GitHubToken, UserSlug
+from auth.domain.value_objects import Email, GitHubRawRepo, GitHubToken, GitHubUserPayload, UserSlug
 
 
 # ---------------------------------------------------------------------------
@@ -89,24 +89,6 @@ class User:
     updated_at:      datetime
     github_identity: GithubIdentity | None  = field(default=None)
     skills:          tuple[Skill, ...]      = field(default_factory=tuple)
-
-
-# ---------------------------------------------------------------------------
-# GitHubUserPayload  — DTO entre infra y dominio
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class GitHubUserPayload:
-    """
-    Datos crudos de la API de GitHub.
-    La infra lo construye; el dominio lo consume como input de funciones puras.
-    """
-    github_id: int
-    login:     str
-    name:      str | None
-    email:     str | None
-    repos:     tuple[GitHubRawRepo, ...]
-
 
 # ---------------------------------------------------------------------------
 # Funciones puras de transformación

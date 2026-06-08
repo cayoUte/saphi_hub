@@ -27,6 +27,7 @@ import logging
 from typing import Any
 
 import httpx
+from pydantic import BaseModel, Field, ValidationError
 
 from auth.domain.entities import GitHubUserPayload
 from auth.domain.errors import GitHubApiError, GitHubCodeExchangeError
@@ -34,6 +35,40 @@ from auth.domain.value_objects import GitHubCode, GitHubRawRepo, GitHubToken
 from shared.result import Err, Ok, Result
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Modelos Pydantic privados para respuestas de GitHub API
+# ---------------------------------------------------------------------------
+
+class _GitHubTokenResponse(BaseModel):
+    """Respuesta de POST /login/oauth/access_token"""
+    access_token: str | None = None
+    error: str | None = None
+    error_description: str | None = None
+
+
+class _GitHubProfileResponse(BaseModel):
+    """Respuesta de GET /user"""
+    id: int
+    login: str
+    name: str | None = None
+    email: str | None = None
+
+
+class _GitHubEmailEntry(BaseModel):
+    """Entrada de GET /user/emails"""
+    email: str
+    primary: bool
+    verified: bool
+
+
+class _GitHubRepoEntry(BaseModel):
+    """Entrada de GET /user/repos"""
+    name: str
+    language: str | None = None
+    topics: list[str] = Field(default_factory=list)
+    stargazers_count: int = 0
+    fork: bool = False
 
 # ---------------------------------------------------------------------------
 # Constantes de la API de GitHub
@@ -107,21 +142,28 @@ class GitHubOAuthAdapter:
             logger.warning("Error de red al contactar GitHub OAuth: %s", exc)
             return Err(GitHubApiError(status_code=0, detail=f"Error de red: {exc}"))
 
-        data = response.json()
+        # Validar respuesta con Pydantic
+        try:
+            data = _GitHubTokenResponse.model_validate(response.json())
+        except ValidationError as exc:
+            logger.error("GitHub devolvió JSON inválido: %s", exc)
+            return Err(GitHubApiError(
+                status_code=response.status_code,
+                detail="Respuesta inválida de GitHub"
+            ))
 
         # GitHub devuelve 200 incluso cuando hay error; el error viene en el cuerpo.
-        if "error" in data:
-            description = data.get("error_description", data["error"])
+        if data.error:
+            description = data.error_description or data.error
             logger.info("GitHub rechazó el código OAuth: %s", description)
             return Err(GitHubCodeExchangeError(raw_response=description))
 
-        token_value = data.get("access_token")
-        if not token_value:
+        if not data.access_token:
             return Err(GitHubCodeExchangeError(
                 raw_response="GitHub no devolvió access_token en la respuesta"
             ))
 
-        return Ok(GitHubToken.create(token_value))
+        return Ok(GitHubToken.create(data.access_token))
 
     # ── fetch_user ───────────────────────────────────────────────────────── #
 
@@ -138,16 +180,26 @@ class GitHubOAuthAdapter:
         """
         auth_headers = {**_GITHUB_HEADERS, "Authorization": f"Bearer {token.value}"}
 
-        # 1. Perfil principal
-        profile_result = await self._get_json(f"{_API_BASE}/user", auth_headers)
-        match profile_result:
-            case Err() as e:
-                return e
-            case Ok(value=profile_data):
-                pass
+        # 1. Perfil principal - hacer request inline con validación Pydantic
+        try:
+            resp = await self._http.get(f"{_API_BASE}/user", headers=auth_headers, timeout=10.0)
+            resp.raise_for_status()
+            profile = _GitHubProfileResponse.model_validate(resp.json())
+        except httpx.HTTPStatusError as exc:
+            logger.warning("GitHub API /user devolvió %s", exc.response.status_code)
+            return Err(GitHubApiError(
+                status_code=exc.response.status_code,
+                detail=_extract_github_message(exc.response),
+            ))
+        except httpx.RequestError as exc:
+            logger.warning("Error de red en GET /user: %s", exc)
+            return Err(GitHubApiError(status_code=0, detail=f"Error de red: {exc}"))
+        except ValidationError as exc:
+            logger.error("GitHub /user devolvió JSON inválido: %s", exc)
+            return Err(GitHubApiError(status_code=200, detail="Respuesta inválida de GitHub"))
 
         # 2. Email: GitHub puede devolver null si el usuario lo ocultó.
-        email = profile_data.get("email")
+        email = profile.email
         if not email:
             email = await self._fetch_primary_email(auth_headers)
 
@@ -155,34 +207,14 @@ class GitHubOAuthAdapter:
         repos = await self._fetch_repos(auth_headers)
 
         return Ok(GitHubUserPayload(
-            github_id=profile_data["id"],
-            login=profile_data["login"],
-            name=profile_data.get("name"),
+            github_id=profile.id,
+            login=profile.login,
+            name=profile.name,
             email=email,
-            repos=repos,
+            repos=tuple(repos),
         ))
 
     # ── helpers privados ─────────────────────────────────────────────────── #
-
-    async def _get_json(
-        self, url: str, headers: dict[str, str]
-    ) -> Result[dict[str, Any], GitHubApiError]:
-        try:
-            response = await self._http.get(url, headers=headers, timeout=10.0)
-            response.raise_for_status()
-            return Ok(response.json())
-
-        except httpx.HTTPStatusError as exc:
-            # 401 → token inválido/revocado
-            # 403 → rate-limit o permisos insuficientes
-            logger.warning("GitHub API %s devolvió %s", url, exc.response.status_code)
-            return Err(GitHubApiError(
-                status_code=exc.response.status_code,
-                detail=_extract_github_message(exc.response),
-            ))
-        except httpx.RequestError as exc:
-            logger.warning("Error de red en GET %s: %s", url, exc)
-            return Err(GitHubApiError(status_code=0, detail=f"Error de red: {exc}"))
 
     async def _fetch_primary_email(self, headers: dict[str, str]) -> str | None:
         """
@@ -198,17 +230,20 @@ class GitHubOAuthAdapter:
             )
             if response.status_code != 200:
                 return None
-            emails: list[dict] = response.json()
+            
+            # Validar cada entrada con Pydantic
+            entries = [_GitHubEmailEntry.model_validate(e) for e in response.json()]
+            
             # Preferimos email primario + verificado; si no, cualquier primario.
-            for entry in emails:
-                if entry.get("primary") and entry.get("verified"):
-                    return entry["email"]
-            for entry in emails:
-                if entry.get("primary"):
-                    return entry["email"]
+            for entry in entries:
+                if entry.primary and entry.verified:
+                    return entry.email
+            for entry in entries:
+                if entry.primary:
+                    return entry.email
             return None
 
-        except httpx.RequestError:
+        except (httpx.RequestError, ValidationError):
             return None
 
     async def _fetch_repos(self, headers: dict[str, str]) -> list[GitHubRawRepo]:
@@ -233,19 +268,22 @@ class GitHubOAuthAdapter:
                 logger.warning("No se pudieron obtener repos: HTTP %s", response.status_code)
                 return []
 
+            # Validar cada repo con Pydantic
+            entries = [_GitHubRepoEntry.model_validate(r) for r in response.json()]
+            
             return [
                 GitHubRawRepo(
-                    name=repo.get("name", ""),
-                    language=repo.get("language"),
-                    topics=repo.get("topics", []),
-                    stargazers_count=repo.get("stargazers_count", 0),
+                    name=entry.name,
+                    language=entry.language,
+                    topics=entry.topics,
+                    stargazers_count=entry.stargazers_count,
                 )
-                for repo in response.json()
-                if not repo.get("fork", False)   # excluir forks explícitamente
+                for entry in entries
+                if not entry.fork   # excluir forks explícitamente
             ]
 
-        except httpx.RequestError as exc:
-            logger.warning("Error de red obteniendo repos: %s", exc)
+        except (httpx.RequestError, ValidationError) as exc:
+            logger.warning("Error obteniendo repos: %s", exc)
             return []
 
 

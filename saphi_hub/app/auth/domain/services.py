@@ -9,6 +9,8 @@ es trivialmente testeable sin mocks.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from auth.domain.entities import Skill
 from auth.domain.value_objects import GitHubRawRepo, UserSlug
 from shared.result import Err, Ok, Result
@@ -31,7 +33,7 @@ _FRAMEWORK_TOPICS: frozenset[str] = frozenset({
 })
 
 
-def extract_skills_from_repos(repos: list[GitHubRawRepo]) -> list[Skill]:
+def extract_skills_from_repos(repos: Sequence[GitHubRawRepo]) -> list[Skill]:
     """
     Extrae skills ponderadas a partir de los repositorios de GitHub.
 

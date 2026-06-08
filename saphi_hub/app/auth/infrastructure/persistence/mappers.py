@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from auth.domain.entities import GithubIdentity, Skill, User, UserRole
 from auth.domain.value_objects import (
@@ -81,13 +83,14 @@ def user_to_orm(user: User, existing: UserORM | None = None) -> UserORM:
 # ---------------------------------------------------------------------------
 
 def orm_to_github_identity(row: GithubProfileORM) -> GithubIdentity:
+    raw_repos_data = cast(list[dict[str, Any]] | None, row.raw_repos)  # type: ignore[arg-type]
     return GithubIdentity(
         id=row.id,
         user_id=row.user_id,
         github_id=row.github_id,
         github_login=row.github_login,
         access_token=GitHubToken(value=row.access_token),
-        raw_repos=tuple(_parse_raw_repos(row.raw_repos)),
+        raw_repos=tuple(_parse_raw_repos(raw_repos_data)),
         synced_at=_ensure_tz(row.synced_at),
     )
 
@@ -102,7 +105,7 @@ def github_identity_to_orm(
     target.github_id    = identity.github_id
     target.github_login = identity.github_login
     target.access_token = identity.access_token.value   # EncryptedString lo cifra al persistir
-    target.raw_repos    = _serialize_raw_repos(identity.raw_repos)
+    target.raw_repos    = cast(Any, _serialize_raw_repos(identity.raw_repos))
     target.synced_at    = identity.synced_at
     return target
 
@@ -150,23 +153,21 @@ def _ensure_tz(dt: datetime) -> datetime:
     return dt
 
 
-def _parse_raw_repos(raw: dict | list | None) -> list[GitHubRawRepo]:
+def _parse_raw_repos(raw: list[dict[str, Any]] | None) -> list[GitHubRawRepo]:
     if not raw:
         return []
-    # raw_repos se almacena como lista de objetos JSON
-    items = raw if isinstance(raw, list) else []
-    result = []
-    for item in items:
+    result: list[GitHubRawRepo] = []
+    for item in raw:
         result.append(GitHubRawRepo(
-            name=item.get("name", ""),
+            name=item.get("name", "") or "",
             language=item.get("language"),
-            topics=item.get("topics", []),
-            stargazers_count=item.get("stargazers_count", 0),
+            topics=list(item.get("topics") or []),
+            stargazers_count=int(item.get("stargazers_count") or 0),
         ))
     return result
 
 
-def _serialize_raw_repos(repos: list[GitHubRawRepo]) -> list[dict]:
+def _serialize_raw_repos(repos: Sequence[GitHubRawRepo]) -> list[dict[str, Any]]:
     return [
         {
             "name": r.name,

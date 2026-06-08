@@ -15,10 +15,12 @@ porque su ciclo de vida es por-request, no por-app.
 from __future__ import annotations
 
 import httpx
+from typing import cast
 from sqlalchemy.orm import Session, sessionmaker
 
 from auth.application.use_cases.github_login import (
     GitHubLoginFn,
+    GitHubOAuthPort,
     make_github_login,
 )
 
@@ -87,7 +89,7 @@ class AuthContainer:
                 result = await execute(code)
         """
         return make_github_login(
-            github=self._github,
+            github=cast(GitHubOAuthPort, self._github),
             users=uow.users,                   # type: ignore[arg-type]
             github_profiles=uow.github_profiles, # type: ignore[arg-type]
             issue_token=self.token_issuer.issue,  # Callable directo — sin wrapper

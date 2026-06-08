@@ -1,0 +1,53 @@
+---
+description: Lenguaje compartido y convenciones del proyecto Acadex/Saphi Hub. Aplica siempre que se trabaje en cualquier archivo del proyecto.
+globs: ["app/**/*.py"]
+alwaysApply: true
+---
+
+# Contexto del Proyecto — Acadex API
+
+## Vocabulario del Dominio
+
+| Término | Significado en este proyecto |
+|---------|------------------------------|
+| `User` | Entidad de dominio inmutable (`dataclass frozen`). No es el ORM. |
+| `UserORM` | Modelo SQLAlchemy en `infrastructure/persistence/orm_models.py` |
+| `DomainUser` | Alias usado en imports para distinguir `User` de dominio vs otros |
+| `GithubIdentity` | Perfil de GitHub vinculado a un `User`. `github_id` es estable, `github_login` puede cambiar. |
+| `GitHubCode` | Código temporal de OAuth. Opaco para nosotros. |
+| `GitHubToken` | Access token de GitHub (no nuestro JWT). |
+| `AccessToken` | JWT firmado por nosotros. Tiene `.value` y `.expires_in`. |
+| `UserSlug` | Slug URL-safe generado desde `display_name`. Ejemplo: `maria-jose-ruiz`. |
+| `Email` | Value object con `.value: str` normalizado a lowercase. |
+| `Skill` | Habilidad extraída de repos GitHub. Tiene `name`, `category`, `weight`. |
+| `Result[T, E]` | Tipo funcional `Ok(value) \| Err(error)`. No usar excepciones para flujo de negocio. |
+| `Option[T]` | `Some(value) \| Nothing()`. Para búsquedas que pueden no encontrar. |
+| `materialization cascade` | Proceso de crear slugs únicos con sufijo numérico para colisiones. |
+| `best-effort` | Skills de GitHub se sincronizan sin bloquear el login si fallan. |
+
+## Capas y sus Responsabilidades
+
+```
+routes/         → HTTP: request/response, HTTPException, schemas Pydantic
+application/    → Orquestación: casos de uso, puertos (Protocol), Railway
+domain/         → Reglas de negocio: entidades, value objects, errores, servicios
+infrastructure/ → Adaptadores: SQLAlchemy ORM, GitHub API client, JWT, encryption
+shared/         → Utilidades cross-cutting: Result, Option, DB session
+```
+
+## Convenciones de Código
+
+- **Entidades**: `dataclass(frozen=True)`. Transformaciones via `dataclasses.replace()`.
+- **Errores de dominio**: `dataclass(frozen=True)`. Se viajan dentro de `Err[E]`.
+- **Casos de uso**: funciones de orden superior (`make_*`), devuelven `Callable`.
+- **Repositorios**: Protocols en `domain/repositories.py`, implementados en `infrastructure/`.
+- **Mappers**: en `infrastructure/persistence/mappers.py`. Son los únicos que conocen ORM + dominio.
+- **Pattern matching**: preferir `match/case` sobre `if isinstance()`.
+- **`from __future__ import annotations`**: en todos los archivos (forward references).
+- **`__all__`**: declarar en todos los módulos públicos.
+
+## Stack
+
+- Python 3.12 · FastAPI 0.115 · Pydantic v2 · SQLAlchemy 2.0 · Alembic · PostgreSQL
+- Tests: pytest + pytest-asyncio
+- Type checker: Pyright (ver `pyrightconfig.json`)

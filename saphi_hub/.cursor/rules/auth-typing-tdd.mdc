@@ -1,0 +1,150 @@
+---
+description: Red-Green-Refactor para cambios de typing en el módulo auth. Aplica cuando se modifiquen schemas Pydantic, value objects, o contratos de funciones en auth/.
+globs: ["app/auth/**/*.py", "tests/auth/**/*.py"]
+alwaysApply: false
+---
+
+# Skill: TDD para Cambios de Typing — Auth Module
+
+## Principio
+
+Un cambio de typing que no rompe ningún test existente **y** no añade tests nuevos probablemente no cambió nada observable. Cada ajuste de tipo debe tener evidencia.
+
+## Ciclo Red-Green-Refactor para Typing
+
+### 🔴 RED — Escribir el test que falla
+
+Antes de cambiar `routes/schemas.py` o cualquier función tipada:
+
+```python
+# tests/auth/test_schemas.py  (crear si no existe)
+
+from auth.domain.entities import User, UserRole, Skill
+from auth.domain.value_objects import Email, UserSlug
+from auth.routes.schemas import UserOut, SkillOut
+import uuid, datetime
+
+def make_domain_user(**overrides) -> User:
+    """Factory para tests — evita repetición."""
+    defaults = dict(
+        id=uuid.uuid4(),
+        role=UserRole.student,
+        email=Email(value="test@test.com"),
+        display_name="Test User",
+        slug=UserSlug(value="test-user"),
+        is_active=True,
+        created_at=datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc),
+        updated_at=datetime.datetime(2024, 1, 1, tzinfo=datetime.timezone.utc),
+        skills=(),
+    )
+    return User(**{**defaults, **overrides})
+
+
+def test_user_out_role_is_enum_value():
+    """UserOut.role serializa como string pero acepta UserRole."""
+    user = make_domain_user()
+    out = UserOut.from_domain(user)
+    assert out.role == UserRole.student
+    assert out.model_dump()["role"] == "student"   # serializa a string
+
+
+def test_user_out_email_is_string():
+    """Email del value object se extrae como string plano."""
+    user = make_domain_user(email=Email(value="maria@example.com"))
+    out = UserOut.from_domain(user)
+    assert out.email == "maria@example.com"
+
+
+def test_user_out_slug_is_string():
+    user = make_domain_user(slug=UserSlug(value="maria-jose-ruiz"))
+    out = UserOut.from_domain(user)
+    assert out.slug == "maria-jose-ruiz"
+
+
+def test_skill_out_category_rejects_invalid():
+    """SkillOut rechaza categorías fuera del Literal permitido."""
+    import pytest
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        SkillOut(name="Python", category="invalid_category", weight=80)
+
+
+def test_skill_out_accepts_valid_categories():
+    for cat in ["language", "topic", "framework", "other"]:
+        s = SkillOut(name="X", category=cat, weight=50)
+        assert s.category == cat
+```
+
+Ejecutar: `pytest tests/auth/test_schemas.py -v` → debe **fallar** (los métodos no existen aún).
+
+### 🟢 GREEN — Mínimo cambio para pasar
+
+Implementar solo lo necesario en `routes/schemas.py`:
+
+1. `UserOut.from_domain()` factory method
+2. `role: UserRole` con serialización correcta
+3. `SkillCategory = Literal[...]` en `SkillOut`
+
+No tocar el router hasta que los tests de schemas pasen.
+
+```bash
+pytest tests/auth/test_schemas.py -v   # debe ser verde
+pytest tests/auth/ -v                  # todos los tests anteriores siguen verdes
+```
+
+### 🔵 REFACTOR — Propagar tipos al router
+
+Solo después de tener tests verdes, actualizar `routes/router.py`:
+
+1. Reemplazar `_to_user_out(user)` por `UserOut.from_domain(user)`
+2. Anotar `payload` del JWT como `JWTPayload` TypedDict
+3. Eliminar `# type: ignore[possibly-undefined]`
+
+```bash
+pyright app/auth/routes/router.py   # sin errores nuevos
+pytest tests/auth/ -v               # sigue verde
+```
+
+## Estructura de Tests Existente
+
+```
+tests/
+├── auth/
+│   ├── conftest.py          ← fixtures compartidos (revisar antes de añadir nuevos)
+│   └── test_github_login.py ← tests del caso de uso
+```
+
+**Antes de escribir un fixture nuevo**: revisar `conftest.py`. Si ya existe un `make_user` o similar, extenderlo.
+
+## Reglas de Tests para Typing
+
+| Regla | Ejemplo |
+|-------|---------|
+| Un test por invariante de tipo | `test_user_out_role_is_enum_value` no prueba otra cosa |
+| Usar `.model_dump()` para verificar serialización JSON | `assert out.model_dump()["role"] == "student"` |
+| Probar el rechazo de valores inválidos con `pytest.raises(ValidationError)` | `SkillOut(category="bad")` debe fallar |
+| No mockear el dominio en tests de schemas | Usar factories reales con `Email(value=...)` |
+| Nombrar factories `make_*` en `conftest.py` | `make_domain_user()`, `make_skill()` |
+
+## Verificación Final
+
+```bash
+# 1. Tests verdes
+pytest tests/auth/ -v --tb=short
+
+# 2. Pyright limpio en el módulo auth
+pyright app/auth/ --outputjson | python -c "
+import json, sys
+data = json.load(sys.stdin)
+errors = [d for d in data['generalDiagnostics'] if d['severity'] == 'error']
+print(f'{len(errors)} errores de tipo')
+for e in errors:
+    print(f\"  {e['file']}:{e['range']['start']['line']} — {e['message']}\")
+"
+
+# 3. Smoke test del schema
+python -c "
+from app.auth.routes.schemas import UserOut, SkillOut
+print('Schemas importan correctamente ✓')
+"
+```
