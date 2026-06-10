@@ -7,8 +7,8 @@ from core.config import settings
 # importar todos los modelos para que Alembic los detecte
 import auth.models.user
 import auth.models.github_profile
-import app.institutions.models.institution
-import app.institutions.models.verification_checklist
+# import app.institutions.models.institution
+# import app.institutions.models.verification_checklist
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

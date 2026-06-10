@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, TypedDict, cast
 
 from jose import jwt
 from jose.exceptions import ExpiredSignatureError, JWTError
@@ -37,6 +37,50 @@ from shared.result import Err, Ok, Result
 
 
 _ALGORITHM = "HS256"
+
+
+def _validate_payload(raw: dict[str, Any]) -> _JWTPayload:
+    """
+    Valida que el payload decodificado tenga la estructura esperada.
+    
+    Reemplaza el cast ciego con validación explícita de tipos y campos.
+    Si la validación falla, lanza JWTError que será capturada por decode().
+    
+    Args:
+        raw: Diccionario retornado por jwt.decode()
+        
+    Returns:
+        Payload tipado como _JWTPayload después de validación exitosa
+        
+    Raises:
+        JWTError: Si faltan campos requeridos o los tipos son incorrectos
+    """
+    # Verificar que todos los campos requeridos existen
+    if not all(k in raw for k in ("sub", "role", "iat", "exp")):
+        raise JWTError("missing required claims")
+    
+    # Verificar tipos de los campos string
+    if not isinstance(raw["sub"], str) or not isinstance(raw["role"], str):
+        raise JWTError("invalid claim types")
+    
+    # Cast seguro: ya validamos estructura y tipos arriba
+    return cast(_JWTPayload, raw)
+
+
+class _JWTPayload(TypedDict):
+    """
+    Structure of JWT payload decoded by jose.jwt.decode().
+    
+    Fields match the documented JWT structure:
+    - sub: user_id as string (RFC 7519 subject claim)
+    - role: user role value (private claim for authorization)
+    - iat: issued at timestamp (UTC epoch)
+    - exp: expires at timestamp (UTC epoch)
+    """
+    sub: str
+    role: str
+    iat: int
+    exp: int
 
 
 class JWTTokenIssuer:
@@ -66,7 +110,7 @@ class JWTTokenIssuer:
         now    = datetime.now(timezone.utc)
         expiry = now + timedelta(minutes=self._expires_minutes)
 
-        payload = {
+        payload: dict[str, str | int] = {
             "sub":  str(user_id),
             "role": role.value,
             "iat":  int(now.timestamp()),
@@ -82,7 +126,7 @@ class JWTTokenIssuer:
 
     def decode(
         self, token: str
-    ) -> Result[dict[str, Any], TokenExpiredError | TokenInvalidError]:
+    ) -> Result[_JWTPayload, TokenExpiredError | TokenInvalidError]:
         """
         Verifica y decodifica un JWT.
         Usado por la dependencia get_current_user de FastAPI.
@@ -93,12 +137,13 @@ class JWTTokenIssuer:
             Err(TokenInvalidError) → firma inválida, malformado o algoritmo inesperado.
         """
         try:
-            payload = jwt.decode(
+            raw_payload = jwt.decode(
                 token,
                 self._secret,
                 algorithms=[_ALGORITHM],
                 options={"require": ["sub", "role", "exp", "iat"]},
             )
+            payload = _validate_payload(raw_payload)
             return Ok(payload)
 
         except ExpiredSignatureError:

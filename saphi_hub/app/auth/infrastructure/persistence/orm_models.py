@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
     BigInteger,
@@ -82,7 +83,7 @@ class GithubProfileORM(Base):
     github_login: Mapped[str]       = mapped_column(String, nullable=False)
     # access_token se persiste encriptado via EncryptedString TypeDecorator
     access_token: Mapped[str]       = mapped_column(Text, nullable=False)
-    raw_repos:    Mapped[dict | None] = mapped_column(JSONB)
+    raw_repos:    Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     synced_at:    Mapped[datetime]  = mapped_column(TIMESTAMP(timezone=True), server_default=func.now(), nullable=False)
 
     user: Mapped[UserORM] = relationship("UserORM", back_populates="github_profile")
